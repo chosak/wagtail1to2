@@ -1,3 +1,5 @@
+from __future__ import raise_from
+
 import re
 import sys
 
@@ -27,6 +29,10 @@ _WAGTAIL_MOVES_1_TO_2 = [
     ('wagtail.wagtailsites', 'wagtail.sites'),
     ('wagtail.wagtailsnippets', 'wagtail.snippets'),
     ('wagtail.wagtailusers', 'wagtail.users'),
+
+    # This is needed to support use of importlib.import_module when importing
+    # submodules of wagtail.contrib.
+    ('wagtail.contrib', 'wagtail.contrib'),
 ]
 
 
@@ -38,7 +44,20 @@ class _WagtailImporter(object):
     """
     def __init__(self, name, moves):
         self.name = name
-        self.moves = dict(moves)
+        self.moves = moves
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self.real_module, name)
+        except AttributeError as e:
+            try:
+                new_module_name = self.moved_definitions[name]
+            except KeyError:
+                raise e
+
+        wagtail_module = self._import_module(wagtail_name)
+
+        return wagtail_module
 
     def find_module(self, fullname, path):
         """Returns this object if a module is known, otherwise None."""
@@ -72,7 +91,7 @@ class _WagtailImporter(object):
             fullname
         )
 
-        for wagtail1_name, wagtail2_name in self.moves.items():
+        for wagtail1_name, wagtail2_name in self.moves:
             wagtail2_name_re = re.compile(r'^{}(\..*)?$'.format(wagtail2_name))
             match = wagtail2_name_re.search(wagtail_name)
 
@@ -107,3 +126,5 @@ if sys.meta_path:
 
 
 sys.meta_path.append(_importer)
+
+sys.modules[__name__] = _WagtailImporter(__name__, _WAGTAIL_MOVES_1_TO_2)
